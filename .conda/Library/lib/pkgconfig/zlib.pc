@@ -1,0 +1,13 @@
+prefix=c:/Users/s/Documents/projects/Google Earth Engine/.conda/Library
+exec_prefix=c:/Users/s/Documents/projects/Google Earth Engine/.conda/Library
+libdir=c:/Users/s/Documents/projects/Google Earth Engine/.conda/Library/lib
+sharedlibdir=c:/Users/s/Documents/projects/Google Earth Engine/.conda/Library/lib
+includedir=c:/Users/s/Documents/projects/Google Earth Engine/.conda/Library/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.3.1
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}
