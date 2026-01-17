@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import streamlit.components.v1 as components  # Required for Windows fix
+from folium.plugins import Fullscreen
 
 # ---------------------------------------------------------
 # 1. PAGE CONFIGURATION & SECURE AUTH
@@ -173,54 +174,52 @@ st.sidebar.metric(
     delta_color="inverse"
 )
 
-# C. The Chart (Now in Sidebar!)
+# C. Charts in Expanders (Collapsible)
 st.sidebar.markdown("---")
-st.sidebar.markdown("**National Loss Trend**")
 
-fig, ax = plt.subplots(figsize=(4, 3)) # Smaller size for sidebar
-ax.plot(df['Year'], df['Loss_Ha'], color='#d3d3d3', linewidth=1.5)
-active_data = df[df['Year'] <= selected_year]
-ax.plot(active_data['Year'], active_data['Loss_Ha'], color='#ff4b4b', linewidth=2.5)
-ax.scatter([selected_year], [loss_ha], color='red', s=50, zorder=5)
+# National Loss Trend Chart
+with st.sidebar.expander("📈 National Loss Trend", expanded=True):
+    fig, ax = plt.subplots(figsize=(4, 3))
+    ax.plot(df['Year'], df['Loss_Ha'], color='#d3d3d3', linewidth=1.5)
+    active_data = df[df['Year'] <= selected_year]
+    ax.plot(active_data['Year'], active_data['Loss_Ha'], color='#ff4b4b', linewidth=2.5)
+    ax.scatter([selected_year], [loss_ha], color='red', s=50, zorder=5)
+    
+    ax.set_ylabel("Hectares", fontsize=8)
+    ax.tick_params(axis='both', which='major', labelsize=8)
+    ax.grid(True, linestyle='--', alpha=0.3)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    st.pyplot(fig)
+    plt.close(fig)
 
-ax.set_ylabel("Hectares", fontsize=8)
-ax.tick_params(axis='both', which='major', labelsize=8)
-ax.grid(True, linestyle='--', alpha=0.3)
-ax.spines['top'].set_visible(False)
-ax.spines['right'].set_visible(False)
-
-# Display chart in sidebar
-st.sidebar.pyplot(fig)
-plt.close(fig)
-
-# D. County Loss Chart
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Loss by County**")
-
-# Filter county data for selected year
-county_year_data = county_df[county_df['Year'] == selected_year].copy()
-county_year_data = county_year_data.sort_values('Loss_Ha', ascending=True)
-
-# Create horizontal bar chart
-fig2, ax2 = plt.subplots(figsize=(4, 5))
-colors = ['#ff4b4b' if loss > county_year_data['Loss_Ha'].median() else '#ff8080' 
-          for loss in county_year_data['Loss_Ha']]
-bars = ax2.barh(county_year_data['County'], county_year_data['Loss_Ha'], color=colors)
-
-ax2.set_xlabel("Hectares", fontsize=8)
-ax2.tick_params(axis='both', which='major', labelsize=7)
-ax2.grid(True, linestyle='--', alpha=0.3, axis='x')
-ax2.spines['top'].set_visible(False)
-ax2.spines['right'].set_visible(False)
-
-# Add value labels on bars
-for bar, val in zip(bars, county_year_data['Loss_Ha']):
-    ax2.text(bar.get_width() + 500, bar.get_y() + bar.get_height()/2, 
-             f'{val:,.0f}', va='center', fontsize=6)
-
-plt.tight_layout()
-st.sidebar.pyplot(fig2)
-plt.close(fig2)
+# County Loss Chart
+with st.sidebar.expander("📊 Loss by County", expanded=True):
+    # Filter county data for selected year
+    county_year_data = county_df[county_df['Year'] == selected_year].copy()
+    county_year_data = county_year_data.sort_values('Loss_Ha', ascending=True)
+    
+    # Create horizontal bar chart
+    fig2, ax2 = plt.subplots(figsize=(4, 5))
+    colors = ['#ff4b4b' if loss > county_year_data['Loss_Ha'].median() else '#ff8080' 
+              for loss in county_year_data['Loss_Ha']]
+    bars = ax2.barh(county_year_data['County'], county_year_data['Loss_Ha'], color=colors)
+    
+    ax2.set_xlabel("Hectares", fontsize=8)
+    ax2.tick_params(axis='both', which='major', labelsize=7)
+    ax2.grid(True, linestyle='--', alpha=0.3, axis='x')
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
+    
+    # Add value labels on bars
+    for bar, val in zip(bars, county_year_data['Loss_Ha']):
+        ax2.text(bar.get_width() + 500, bar.get_y() + bar.get_height()/2, 
+                 f'{val:,.0f}', va='center', fontsize=6)
+    
+    plt.tight_layout()
+    st.pyplot(fig2)
+    plt.close(fig2)
 
 
 # ---------------------------------------------------------
@@ -259,6 +258,9 @@ m.add_geojson(geemap.ee_to_geojson(liberia_counties), style=style, layer_name="C
 m.add_basemap('OpenStreetMap') # Add OSM as an option
 m.add_layer_control()
 
+# 5. Add Fullscreen button
+Fullscreen(position='topleft').add_to(m)
+
 # ---------------------------------------------------------
 # 5. RENDER MAP (Windows Fix Applied)
 # ---------------------------------------------------------
@@ -269,5 +271,5 @@ m.to_html("map_render.html")
 with open("map_render.html", "r", encoding='utf-8') as f:
     map_html = f.read()
 
-# Render full width (height=700 gives a nice immersive view)
-components.html(map_html, height=700, scrolling=True)
+# Render full width (height=850 for better visibility)
+components.html(map_html, height=850, scrolling=True)
