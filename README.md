@@ -16,10 +16,10 @@ Interactive Google Earth Engine-powered application for visualizing forest loss 
 
 ## Features
 
-- 🗺️ Interactive map visualization of Liberia
-- 🌲 Hansen Global Forest Change data overlay
-- 📊 Forest loss statistics by county
-- 📈 Time series analysis (2001-2024)
+- Interactive map visualization of Liberia
+- Hansen Global Forest Change data overlay
+- Forest loss statistics by county
+- Time series analysis (2001-2024)
 
 ## Data Sources
 
@@ -31,3 +31,4 @@ Interactive Google Earth Engine-powered application for visualizing forest loss 
 - [Streamlit](https://streamlit.io/)
 - [geemap](https://geemap.org/)
 - [Google Earth Engine](https://earthengine.google.com/)
+- By: Tim Casanda Gibson

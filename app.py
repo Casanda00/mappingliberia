@@ -12,21 +12,38 @@ import streamlit.components.v1 as components  # Required for Windows fix
 # layout="wide" allows the map to stretch across the whole screen
 st.set_page_config(layout="wide", page_title="Liberia Forest Loss Tracker")
 
-# Securely retrieve the token
-ee_token = os.environ.get("EARTHENGINE_TOKEN")
+# Securely retrieve the service account credentials
+import json
 
-if ee_token:
-    credential_folder = os.path.expanduser("~/.config/earthengine/")
-    if not os.path.exists(credential_folder):
-        os.makedirs(credential_folder)
-    with open(os.path.join(credential_folder, 'credentials'), 'w') as f:
-        f.write(ee_token)
+def initialize_ee():
+    """Initialize Earth Engine with service account or local credentials."""
+    # Try service account first (for Hugging Face deployment)
+    service_account_json = os.environ.get("GEE_SERVICE_ACCOUNT")
+    
+    if service_account_json:
+        try:
+            # Parse the JSON credentials from environment variable
+            service_account_info = json.loads(service_account_json)
+            credentials = ee.ServiceAccountCredentials(
+                email=service_account_info['client_email'],
+                key_data=service_account_json
+            )
+            ee.Initialize(credentials=credentials)
+            return True
+        except Exception as e:
+            st.error(f"Service account auth failed: {e}")
+            return False
+    else:
+        # Fallback for local development
+        try:
+            ee.Initialize()
+            return True
+        except Exception:
+            st.error("Please set GEE_SERVICE_ACCOUNT environment variable with your service account JSON")
+            st.stop()
+            return False
 
-try:
-    ee.Initialize()
-except Exception:
-    ee.Authenticate()
-    ee.Initialize()
+initialize_ee()
 
 # ---------------------------------------------------------
 # 2. DATA PROCESSING
