@@ -226,8 +226,14 @@ with st.sidebar.expander("📊 Loss by County", expanded=True):
 # ---------------------------------------------------------
 st.subheader(f"Liberia Forest Loss: 2000–{selected_year}")
 
-# Create Map (Safe Initialization)
-m = geemap.Map(center=[6.5, -9.5], zoom=7)
+# Initialize session state for map view persistence
+if 'map_center' not in st.session_state:
+    st.session_state.map_center = [6.5, -9.5]
+if 'map_zoom' not in st.session_state:
+    st.session_state.map_zoom = 7
+
+# Create Map using stored center/zoom (preserves view on year change)
+m = geemap.Map(center=st.session_state.map_center, zoom=st.session_state.map_zoom)
 
 # Add Basemap manually (Safest method)
 try:
@@ -258,14 +264,65 @@ m.add_basemap('OpenStreetMap') # Add OSM as an option
 m.add_layer_control()
 
 # ---------------------------------------------------------
-# 5. RENDER MAP (Windows Fix Applied)
+# 5. RENDER MAP (Windows Fix Applied + View Persistence)
 # ---------------------------------------------------------
 # Save to static HTML
 m.to_html("map_render.html")
 
-# Read and display manually
+# Read and inject view persistence JavaScript
 with open("map_render.html", "r", encoding='utf-8') as f:
     map_html = f.read()
+
+# JavaScript to save and restore map view
+view_persistence_js = """
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Wait for Leaflet map to be available
+    var checkMap = setInterval(function() {
+        var mapContainer = document.querySelector('.folium-map');
+        if (mapContainer && mapContainer._leaflet_id) {
+            var mapId = mapContainer._leaflet_id;
+            var map = window['map_' + mapId] || Object.values(window).find(v => v && v._container === mapContainer);
+            
+            // Try to find the map object
+            for (var key in window) {
+                if (window[key] && window[key]._container && window[key]._container.classList && 
+                    window[key]._container.classList.contains('folium-map')) {
+                    map = window[key];
+                    break;
+                }
+            }
+            
+            if (map && map.getCenter) {
+                clearInterval(checkMap);
+                
+                // Restore saved view
+                var savedCenter = localStorage.getItem('liberia_map_center');
+                var savedZoom = localStorage.getItem('liberia_map_zoom');
+                
+                if (savedCenter && savedZoom) {
+                    var center = JSON.parse(savedCenter);
+                    map.setView(center, parseInt(savedZoom), {animate: false});
+                }
+                
+                // Save view on move/zoom
+                map.on('moveend', function() {
+                    var center = map.getCenter();
+                    localStorage.setItem('liberia_map_center', JSON.stringify([center.lat, center.lng]));
+                    localStorage.setItem('liberia_map_zoom', map.getZoom().toString());
+                });
+            }
+        }
+    }, 100);
+    
+    // Stop checking after 5 seconds
+    setTimeout(function() { clearInterval(checkMap); }, 5000);
+});
+</script>
+"""
+
+# Inject the script before closing body tag
+map_html = map_html.replace('</body>', view_persistence_js + '</body>')
 
 # Render full width (height=850 for better visibility)
 components.html(map_html, height=850, scrolling=True)
