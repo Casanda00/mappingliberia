@@ -1,0 +1,10 @@
+# Ignore environment folders
+.conda/
+.condatmp/
+env/
+venv/
+__pycache__/
+drafts/
+
+# Ignore system files
+.DS_Store
