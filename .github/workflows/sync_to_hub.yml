@@ -18,4 +18,4 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git push --force https://USER:$HF_TOKEN@huggingface.co/spaces/casanda00/mappingliberia main
+          git push --force https://casanda00:$HF_TOKEN@huggingface.co/spaces/casanda00/mappingliberia main
