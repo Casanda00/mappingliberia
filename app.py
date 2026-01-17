@@ -6,12 +6,25 @@ import matplotlib.pyplot as plt
 import os
 import streamlit.components.v1 as components
 import json
-import hashlib
 
 # ---------------------------------------------------------
 # 1. PAGE CONFIGURATION & SECURE AUTH
 # ---------------------------------------------------------
 st.set_page_config(layout="wide", page_title="Liberia Forest Loss Tracker")
+
+# Remove default padding to stretch map edge-to-edge
+st.markdown("""
+<style>
+    .block-container {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        max-width: 100% !important;
+    }
+    iframe {
+        width: 100% !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 def initialize_ee():
     """Initialize Earth Engine with service account or local credentials."""
@@ -52,8 +65,6 @@ initialize_ee()
 # ---------------------------------------------------------
 if 'selected_year' not in st.session_state:
     st.session_state.selected_year = 2024
-if 'map_needs_update' not in st.session_state:
-    st.session_state.map_needs_update = False
 
 # ---------------------------------------------------------
 # 3. DATA PROCESSING (Cached)
@@ -155,8 +166,8 @@ def get_county_forest_loss():
 # 4. CACHE MAP HTML BY YEAR (Key optimization)
 # ---------------------------------------------------------
 @st.cache_data
-def generate_map_html(year: int, _liberia_boundary, _liberia_counties) -> str:
-    """Generate and cache the map HTML for each year."""
+def generate_map_html(year: int, _liberia_boundary, _liberia_counties, county_stats: dict) -> str:
+    """Generate and cache the map HTML for each year with interactive county selection."""
     m = geemap.Map(center=[6.5, -9.5], zoom=7)
     
     try:
@@ -177,9 +188,22 @@ def generate_map_html(year: int, _liberia_boundary, _liberia_counties) -> str:
     cumulative_loss = lossyear.lte(loss_val).And(lossyear.neq(0)).And(forest2000)
     m.addLayer(cumulative_loss.selfMask(), {'palette': ['red']}, 'Cumulative Loss')
     
-    # Counties (Overlay)
-    style = {'color': 'white', 'weight': 1, 'fillOpacity': 0}
-    m.add_geojson(geemap.ee_to_geojson(_liberia_counties), style=style, layer_name="Counties")
+    # Convert counties to GeoJSON and enrich with stats
+    counties_geojson = geemap.ee_to_geojson(_liberia_counties)
+    
+    # Add forest loss stats to each county feature
+    for feature in counties_geojson.get('features', []):
+        county_name = feature.get('properties', {}).get('ADM1_NAME', 'Unknown')
+        if county_name in county_stats:
+            stats = county_stats[county_name]
+            feature['properties']['loss_ha'] = stats.get('Loss_Ha', 0)
+            feature['properties']['baseline_ha'] = stats.get('Baseline_Ha', 0)
+            feature['properties']['loss_pct'] = stats.get('Percent', 0)
+    
+    # Counties (Overlay) - nearly transparent fill to allow click detection, yellow border on hover
+    style = {'color': 'white', 'weight': 1, 'fillColor': '#000000', 'fillOpacity': 0.01}
+    hover_style = {'color': 'yellow', 'weight': 2, 'fillColor': '#000000', 'fillOpacity': 0.01}
+    m.add_geojson(counties_geojson, style=style, hover_style=hover_style, layer_name="Counties", info_mode=None)
     
     m.add_basemap('OpenStreetMap')
     m.add_layer_control()
@@ -196,12 +220,15 @@ def generate_map_html(year: int, _liberia_boundary, _liberia_counties) -> str:
     
     os.unlink(temp_path)
     
-    # Inject view persistence JavaScript
-    view_persistence_js = """
+    # Inject view persistence + county selection JavaScript
+    interactive_js = """
 <script>
 (function() {
     var KEY_CENTER = 'liberia_map_center';
     var KEY_ZOOM = 'liberia_map_zoom';
+    var selectedLayer = null;
+    var originalStyle = {color: 'white', weight: 1, fillOpacity: 0};
+    var selectedStyle = {color: '#00ffff', weight: 3, fillOpacity: 0};
     
     function findLeafletMap() {
         for (var key in window) {
@@ -216,28 +243,28 @@ def generate_map_html(year: int, _liberia_boundary, _liberia_counties) -> str:
         return null;
     }
     
-    function initMapPersistence() {
+    function formatNumber(num) {
+        return num.toLocaleString('en-US', {maximumFractionDigits: 0});
+    }
+    
+    function initMapFeatures() {
         var map = findLeafletMap();
         if (!map) {
-            setTimeout(initMapPersistence, 50);
+            setTimeout(initMapFeatures, 50);
             return;
         }
         
-        // Restore saved view immediately
+        // Restore saved view
         try {
             var savedCenter = localStorage.getItem(KEY_CENTER);
             var savedZoom = localStorage.getItem(KEY_ZOOM);
-            
             if (savedCenter && savedZoom) {
                 var center = JSON.parse(savedCenter);
-                var zoom = parseInt(savedZoom);
-                map.setView(center, zoom, {animate: false, duration: 0});
+                map.setView(center, parseInt(savedZoom), {animate: false, duration: 0});
             }
-        } catch(e) {
-            console.log('Could not restore map view:', e);
-        }
+        } catch(e) {}
         
-        // Save view on any movement
+        // Save view on movement
         function saveView() {
             try {
                 var center = map.getCenter();
@@ -245,22 +272,75 @@ def generate_map_html(year: int, _liberia_boundary, _liberia_counties) -> str:
                 localStorage.setItem(KEY_ZOOM, map.getZoom().toString());
             } catch(e) {}
         }
-        
         map.on('moveend', saveView);
         map.on('zoomend', saveView);
+        
+        // Find GeoJSON layers and add click handlers
+        map.eachLayer(function(layer) {
+            if (layer.feature && layer.feature.properties && layer.feature.properties.ADM1_NAME) {
+                layer.on('click', function(e) {
+                    // Reset previous selection
+                    if (selectedLayer && selectedLayer !== layer) {
+                        selectedLayer.setStyle(originalStyle);
+                    }
+                    
+                    // Highlight clicked county
+                    layer.setStyle(selectedStyle);
+                    selectedLayer = layer;
+                    
+                    // Get county stats
+                    var props = layer.feature.properties;
+                    var name = props.ADM1_NAME || 'Unknown';
+                    var lossHa = props.loss_ha || 0;
+                    var baselineHa = props.baseline_ha || 0;
+                    var lossPct = props.loss_pct || 0;
+                    
+                    // Create popup content with period
+                    var selectedYear = SELECTED_YEAR_PLACEHOLDER;
+                    var periodYears = selectedYear - 2000;
+                    var content = '<div style="font-family: Arial, sans-serif; min-width: 200px;">' +
+                        '<h4 style="margin: 0 0 8px 0; color: #333; border-bottom: 2px solid #ff4b4b; padding-bottom: 5px;">' + 
+                        name + ' County</h4>' +
+                        '<p style="margin: 0 0 8px 0; font-size: 11px; color: #888;">Period: 2001 – ' + selectedYear + ' (' + periodYears + ' years)</p>' +
+                        '<table style="width: 100%; font-size: 12px;">' +
+                        '<tr><td style="color: #666;">Baseline (2000):</td><td style="text-align: right; font-weight: bold;">' + 
+                        formatNumber(baselineHa) + ' Ha</td></tr>' +
+                        '<tr><td style="color: #666;">Cumulative Loss:</td><td style="text-align: right; font-weight: bold; color: #ff4b4b;">' + 
+                        formatNumber(lossHa) + ' Ha</td></tr>' +
+                        '<tr><td style="color: #666;">Loss Percentage:</td><td style="text-align: right; font-weight: bold; color: #ff4b4b;">' + 
+                        lossPct.toFixed(1) + '%</td></tr>' +
+                        '</table></div>';
+                    
+                    // Show popup without auto-panning
+                    layer.bindPopup(content, {maxWidth: 250, autoPan: false}).openPopup();
+                    
+                    L.DomEvent.stopPropagation(e);
+                });
+            }
+        });
+        
+        // Click on map (not county) to deselect
+        map.on('click', function(e) {
+            if (selectedLayer) {
+                selectedLayer.setStyle(originalStyle);
+                selectedLayer.closePopup();
+                selectedLayer = null;
+            }
+        });
     }
     
-    // Start immediately, don't wait for DOMContentLoaded
     if (document.readyState === 'complete') {
-        initMapPersistence();
+        initMapFeatures();
     } else {
-        document.addEventListener('DOMContentLoaded', initMapPersistence);
+        document.addEventListener('DOMContentLoaded', initMapFeatures);
     }
 })();
 </script>
 """
     
-    html_content = html_content.replace('</body>', view_persistence_js + '</body>')
+    # Replace year placeholder and inject script
+    interactive_js = interactive_js.replace('SELECTED_YEAR_PLACEHOLDER', str(year))
+    html_content = html_content.replace('</body>', interactive_js + '</body>')
     return html_content
 
 # Load Data (cached)
@@ -275,17 +355,13 @@ with st.spinner("Loading County-Level Data..."):
 # ---------------------------------------------------------
 st.sidebar.title("🌲 Controls")
 
-# Year slider with on_change callback to minimize reruns
-def on_year_change():
-    st.session_state.map_needs_update = True
-
+# Year slider
 selected_year = st.sidebar.slider(
     "Year", 
     2001, 
     2024, 
     st.session_state.selected_year,
-    key="year_slider",
-    on_change=on_year_change
+    key="year_slider"
 )
 
 # Update session state
@@ -351,8 +427,11 @@ with st.sidebar.expander("📊 Loss by County", expanded=True):
 # ---------------------------------------------------------
 st.subheader(f"Liberia Forest Loss: 2000–{selected_year}")
 
+# Build county stats dictionary for selected year
+county_year_stats = county_df[county_df['Year'] == selected_year].set_index('County').to_dict('index')
+
 # Get cached map HTML for this year
-map_html = generate_map_html(selected_year, liberia_boundary, liberia_counties)
+map_html = generate_map_html(selected_year, liberia_boundary, liberia_counties, county_year_stats)
 
 # Render the map
 components.html(map_html, height=850, scrolling=True)
