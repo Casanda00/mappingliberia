@@ -87,11 +87,71 @@ def get_forest_data():
         stats_list.append({'Year': year, 'Loss_Ha': accumulated_area, 'Percent': pct})
         
     df = pd.DataFrame(stats_list)
-    return df, liberia, counties
+    return df, liberia, counties, total_forest_2000_ha
+
+@st.cache_data
+def get_county_forest_loss():
+    """Calculates cumulative forest loss per county for all years."""
+    counties = ee.FeatureCollection('FAO/GAUL/2015/level1').filter(ee.Filter.eq('ADM0_NAME', 'Liberia'))
+    
+    hansen = ee.Image("UMD/hansen/global_forest_change_2024_v1_12")
+    lossyear = hansen.select('lossyear')
+    treecover = hansen.select('treecover2000')
+    forest2000 = treecover.gte(30)
+    
+    # Get county names
+    county_list = counties.aggregate_array('ADM1_NAME').getInfo()
+    
+    # Dictionary to store yearly data per county
+    county_yearly_data = {county: [] for county in county_list}
+    
+    for county_name in county_list:
+        county_geom = counties.filter(ee.Filter.eq('ADM1_NAME', county_name)).geometry()
+        
+        # Get baseline forest area for this county
+        area_img = forest2000.multiply(ee.Image.pixelArea()).divide(10000)
+        baseline = area_img.reduceRegion(
+            reducer=ee.Reducer.sum(),
+            geometry=county_geom,
+            scale=1000,
+            maxPixels=1e9
+        )
+        county_forest_2000 = baseline.get('treecover2000').getInfo() or 0
+        
+        accumulated_loss = 0
+        for year in range(2001, 2025):
+            loss_val = year - 2000
+            yearly_loss = lossyear.eq(loss_val).And(forest2000)
+            stat = yearly_loss.multiply(ee.Image.pixelArea()).divide(10000).reduceRegion(
+                reducer=ee.Reducer.sum(),
+                geometry=county_geom,
+                scale=1000,
+                maxPixels=1e9
+            )
+            val = stat.get('lossyear').getInfo() or 0
+            accumulated_loss += val
+            pct = (accumulated_loss / county_forest_2000 * 100) if county_forest_2000 > 0 else 0
+            county_yearly_data[county_name].append({
+                'Year': year,
+                'County': county_name,
+                'Loss_Ha': accumulated_loss,
+                'Baseline_Ha': county_forest_2000,
+                'Percent': pct
+            })
+    
+    # Flatten to DataFrame
+    all_data = []
+    for county, data in county_yearly_data.items():
+        all_data.extend(data)
+    
+    return pd.DataFrame(all_data)
 
 # Load Data
 with st.spinner("Loading Earth Engine Data..."):
-    df, liberia_boundary, liberia_counties = get_forest_data()
+    df, liberia_boundary, liberia_counties, total_forest_2000 = get_forest_data()
+
+with st.spinner("Loading County-Level Data..."):
+    county_df = get_county_forest_loss()
 
 # ---------------------------------------------------------
 # 3. SIDEBAR (Controls & Chart)
@@ -115,7 +175,7 @@ st.sidebar.metric(
 
 # C. The Chart (Now in Sidebar!)
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Loss Trend**")
+st.sidebar.markdown("**National Loss Trend**")
 
 fig, ax = plt.subplots(figsize=(4, 3)) # Smaller size for sidebar
 ax.plot(df['Year'], df['Loss_Ha'], color='#d3d3d3', linewidth=1.5)
@@ -131,6 +191,37 @@ ax.spines['right'].set_visible(False)
 
 # Display chart in sidebar
 st.sidebar.pyplot(fig)
+plt.close(fig)
+
+# D. County Loss Chart
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Loss by County**")
+
+# Filter county data for selected year
+county_year_data = county_df[county_df['Year'] == selected_year].copy()
+county_year_data = county_year_data.sort_values('Loss_Ha', ascending=True)
+
+# Create horizontal bar chart
+fig2, ax2 = plt.subplots(figsize=(4, 5))
+colors = ['#ff4b4b' if loss > county_year_data['Loss_Ha'].median() else '#ff8080' 
+          for loss in county_year_data['Loss_Ha']]
+bars = ax2.barh(county_year_data['County'], county_year_data['Loss_Ha'], color=colors)
+
+ax2.set_xlabel("Hectares", fontsize=8)
+ax2.tick_params(axis='both', which='major', labelsize=7)
+ax2.grid(True, linestyle='--', alpha=0.3, axis='x')
+ax2.spines['top'].set_visible(False)
+ax2.spines['right'].set_visible(False)
+
+# Add value labels on bars
+for bar, val in zip(bars, county_year_data['Loss_Ha']):
+    ax2.text(bar.get_width() + 500, bar.get_y() + bar.get_height()/2, 
+             f'{val:,.0f}', va='center', fontsize=6)
+
+plt.tight_layout()
+st.sidebar.pyplot(fig2)
+plt.close(fig2)
+
 
 # ---------------------------------------------------------
 # 4. MAIN MAP (Full Width)
