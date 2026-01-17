@@ -5,7 +5,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import streamlit.components.v1 as components  # Required for Windows fix
-from folium.plugins import Fullscreen
 
 # ---------------------------------------------------------
 # 1. PAGE CONFIGURATION & SECURE AUTH
@@ -257,9 +256,6 @@ m.add_geojson(geemap.ee_to_geojson(liberia_counties), style=style, layer_name="C
 # This adds the button to toggle between Esri and OSM
 m.add_basemap('OpenStreetMap') # Add OSM as an option
 m.add_layer_control()
-
-# 5. Add Fullscreen button
-Fullscreen(position='topleft').add_to(m)
 
 # ---------------------------------------------------------
 # 5. RENDER MAP (Windows Fix Applied)
